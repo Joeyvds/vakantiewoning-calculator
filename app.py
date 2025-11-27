@@ -1,17 +1,14 @@
-# app.py — kopieer alles hieronder
+# app.py — volledige nieuwe versie met kosten-uitsplitsing + maandoverzicht
 import streamlit as st
 import pandas as pd
 import numpy as np
-import numpy_financial as npf
 import matplotlib.pyplot as plt
 
 st.set_page_config(page_title="Vakantiewoning Calculator", layout="wide")
-st.title("Vakantiewoning Rendementscalculator 2025")
-st.markdown("### Speciaal voor recreatiewoningen, parken, erfpacht, schoonmaakkosten, etc.")
+st.title("🏖️ Vakantiewoning Rendementscalculator 2025")
 
 # --- INPUTS ---
 col1, col2 = st.columns(2)
-
 with col1:
     st.subheader("Aankoop & Financiering")
     koopsom = st.number_input("Koopsom", value=175000)
@@ -26,83 +23,75 @@ with col2:
     nachtprijs = st.number_input("Gemiddelde nachtprijs (€)", value=135)
     verblijfsduur = st.number_input("Gemiddelde verblijfsduur (nachten)", value=4)
 
-st.subheader("Jaarlijkse kosten (typisch voor vakantiehuizen)")
+st.subheader("Jaarlijkse kosten")
 c1, c2, c3, c4 = st.columns(4)
 vve = c1.number_input("VVE / parkkosten", value=2400)
 schoonmaak = c2.number_input("Schoonmaakkosten per wissel", value=75)
-onderhoud = c3.number_input("Onderhoud & reservering (%) van koopsom", value=2.5) / 100
+onderhoud_pct = c3.number_input("Onderhoud & reservering (% van koopsom)", value=2.5) / 100
 energie_internet = c4.number_input("Energie + internet per maand", value=175)
 
 c5, c6, c7, c8 = st.columns(4)
-beheer = c5.number_input("Beheer / platformkosten (%) van omzet", value=18.0) / 100
-toeristenbelasting = c6.number_input("Toeristenbelasting per persoon per nacht", value=2.25)
+beheer_pct = c5.number_input("Beheer / platformkosten (% van omzet)", value=18.0) / 100
+toeristenbelasting = c6.number_input("Toeristenbelasting p.p.p.n.", value=2.25)
 erfpacht = c7.number_input("Erfpacht per jaar (0 = geen)", value=0)
 indexatie = c8.number_input("Jaarlijkse indexatie prijzen & kosten (%)", value=2.5) / 100
 
-# --- BEREKENING ---
 if st.button("Bereken rendement", type="primary"):
+    # Basisberekeningen jaar 1
     hypotheek = marktwaarde * ltv
-    eigen_inbreng = koopsom + (koopsom * 0.10) + 15000 - hypotheek  # 10% belastingen + bijkomend
-    eigen_inbreng = max(eigen_inbreng, 1000)
+    eigen_inbreng = max(koopsom * 1.10 + 15000 - hypotheek, 1000)
+    bruto_jaaromzet = (bezettingsgraad/100) * 365 * nachtprijs
+    aantal_wissels = (bezettingsgraad/100) * 365 / verblijfsduur
+    personen_per_boeking = 3
 
-    bruto_jaaromzet = (bezettingsgraad / 100) * 365 * nachtprijs
-    aantal_wissels = (bezettingsgraad / 100) * 365 / verblijfsduur
+    omzet = bruto_jaaromzet
+    kosten_vve = vve
+    kosten_schoonmaak = aantal_wissels * schoonmaak
+    kosten_onderhoud = koopsom * onderhoud_pct
+    kosten_energie = energie_internet * 12
+    kosten_beheer = omzet * beheer_pct
+    kosten_toeristenbelasting = (bezettingsgraad/100 * 365 * personen_per_boeking) * toeristenbelasting
+    kosten_erfpacht = erfpacht
+    kosten_rente = hypotheek * rente_aflossingsvrij * 0.9
 
-    jaren = 30
-    resultaten = []
-
-    for jaar in range(1, jaren + 1):
-        omzet = bruto_jaaromzet * (1 + indexatie) ** (jaar - 1)
-        wissels = aantal_wissels * (1 + indexatie) ** (jaar - 1)
-
-        kosten = (
-            vve * (1 + indexatie) ** (jaar - 1) +
-            wissels * schoonmaak +
-            koopsom * onderhoud * (1 + indexatie) ** (jaar - 1) +
-            energie_internet * 12 * (1 + indexatie) ** (jaar - 1) +
-            omzet * beheer +
-            (bezettingsgraad / 100 * 365 * 3) * toeristenbelasting * (1 + indexatie) ** (jaar - 1) +  # ±3 personen
-            erfpacht * (1 + indexatie) ** (jaar - 1)
-        )
-
-        rente = hypotheek * rente_aflossingsvrij * 0.9  # ±90% aflossingsvrij is realistisch
-        netto_cashflow = omzet - kosten - rente - extra_aflossing_per_jaar
-
-        resultaten.append({
-            "Jaar": jaar,
-            "Omzet": round(omzet),
-            "Kosten": round(kosten),
-            "Rente": round(rente),
-            "Netto cashflow": round(netto_cashflow),
-            "Cumulatief cashflow": 0  # wordt hieronder berekend
-        })
-
-    df = pd.DataFrame(resultaten)
-    df["Cumulatief cashflow"] = df["Netto cashflow"].cumsum()
+    totale_kosten = (kosten_vve + kosten_schoonmaak + kosten_onderhoud + kosten_energie +
+                     kosten_beheer + kosten_toeristenbelasting + kosten_erfpacht + kosten_rente)
+    netto_cashflow_jaar = omzet - totale_kosten - extra_aflossing_per_jaar
 
     # Samenvatting
-    bar = bruto_jaaromzet / koopsom
-    nar = (bruto_jaaromzet - df["Kosten"].iloc[0]) / koopsom
-    roe = df["Netto cashflow"].iloc[0] / eigen_inbreng
+    bar = omzet / koopsom
+    nar = (omzet - totale_kosten + kosten_rente) / koopsom
+    roe = netto_cashflow_jaar / eigen_inbreng
 
     col1, col2, col3, col4 = st.columns(4)
-    col1.metric("BAR (Bruto AanvangsRendement)", f"{bar:.1%}")
-    col2.metric("NAR (Netto AanvangsRendement)", f"{nar:.1%}")
-    col3.metric("ROE (Return on Equity)", f"{roe:.1%}")
+    col1.metric("BAR (Bruto)", f"{bar:.1%}")
+    col2.metric("NAR (Netto)", f"{nar:.1%}")
+    col3.metric("ROE", f"{roe:.1%}")
     col4.metric("Eigen inbreng", f"€{eigen_inbreng:,.0f}")
 
-    st.subheader("30-jaars exploitatie")
-    st.dataframe(df.style.format({
-        "Omzet": "€{:,}", "Kosten": "€{:,}", "Rente": "€{:,}",
-        "Netto cashflow": "€{:,}", "Cumulatief cashflow": "€{:,}"
-    }))
+    # 1. Kostenverdeling jaar 1
+    st.subheader("💰 Kostenverdeling jaar 1")
+    kosten_data = {
+        "Post": ["VVE/parkkosten", "Schoonmaak", "Onderhoud", "Energie+internet", "Beheer/platform", "Toeristenbelasting", "Erfpacht", "Hypotheekrente"],
+        "Bedrag": [kosten_vve, kosten_schoonmaak, kosten_onderhoud, kosten_energie, kosten_beheer, kosten_toeristenbelasting, kosten_erfpacht, kosten_rente]
+    }
+    df_kosten = pd.DataFrame(kosten_data)
+    df_kosten["Bedrag"] = df_kosten["Bedrag"].round(0).astype(int)
 
-    st.subheader("Cashflow ontwikkeling")
-    fig, ax = plt.subplots(figsize=(10, 4))
-    ax.plot(df["Jaar"], df["Cumulatief cashflow"] / 1000, marker="o")
-    ax.set_title("Cumulatieve cashflow over 30 jaar")
-    ax.set_ylabel("Duizenden euro's")
-    ax.grid(True, alpha=0.3)
-    st.pyplot(fig)
+    col_a, col_b = st.columns(2)
+    with col_a:
+        fig, ax = plt.subplots(figsize=(6,6))
+        ax.pie(df_kosten["Bedrag"], labels=df_kosten["Post"], autopct="%1.0f%%", startangle=90)
+        ax.axis("equal")
+        st.pyplot(fig)
+    with col_b:
+        st.dataframe(df_kosten.set_index("Post").style.format("€{:,}"))
 
-    st.success("Klaar! Deel deze link met anderen of sla op als bookmark.")
+    # 2. Gemiddelde maand
+    st.subheader("📅 Gemiddelde maand")
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Omzet per maand", f"€{omzet/12:,.0f}")
+    m2.metric("Kosten per maand", f"€{totale_kosten/12:,.0f}")
+    m3.metric("Cashflow per maand", f"€{(netto_cashflow_jaar)/12:,.0f}")
+
+    st.success("Klaar! Alles is nu zichtbaar per jaar én per maand.")
